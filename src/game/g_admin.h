@@ -226,6 +226,7 @@ qboolean G_admin_namelog( gentity_t *ent, int skiparg );
 qboolean G_admin_lock( gentity_t *ent, int skiparg );
 qboolean G_admin_unlock( gentity_t *ent, int skiparg );
 qboolean G_admin_info( gentity_t *ent, int skiparg );
+qboolean G_admin_nobuild(gentity_t *ent, int skiparg );
 qboolean G_admin_buildlog( gentity_t *ent, int skiparg );
 qboolean G_admin_revert( gentity_t *ent, int skiparg );
 qboolean G_admin_pause( gentity_t *ent, int skiparg );
