@@ -791,6 +791,9 @@ void G_InitGame( int levelTime, int randomSeed, int restart )
   // the map might disable some things
   BG_InitAllowedGameElements( );
 
+  // load up nobuild zones
+  nobuild_init( );
+  
   G_InitModCvars( );
   // general initialization
   G_FindTeams( );

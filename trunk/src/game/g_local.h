@@ -906,6 +906,16 @@ int               G_LogBuild( buildHistory_t *new );
 int               G_CountBuildLog( void );
 char             *G_FindBuildLogName( int id );
 
+void              nobuild_init( void );
+void              nobuild_add( gentity_t *ent );
+void              nobuild_del( gentity_t *ent );
+void              nobuild_command( gentity_t *ent, qboolean next_zone, qboolean next_type, float size );
+void              nobuild_set( qboolean enable, gentity_t *ent );
+void              nobuild_save( void );
+void              nobuild_go( gentity_t *ent );
+void              nobuild_list( gentity_t *ent );
+int       		  nobuild_check( vec3_t origin );
+
 //
 // g_utils.c
 //

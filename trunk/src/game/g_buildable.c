@@ -3156,6 +3156,10 @@ itemBuildError_t G_CanBuild( gentity_t *ent, buildable_t buildable, int distance
   if( tr1.entityNum != ENTITYNUM_WORLD )
     reason = IBE_NORMAL;
 
+	// check nobuild zones
+   if( nobuild_check( entity_origin ) >= 0 )
+	reason = IBE_PERMISSION;
+
   contents = trap_PointContents( entity_origin, -1 );
   buildPoints = BG_FindBuildPointsForBuildable( buildable );
 
@@ -4454,4 +4458,624 @@ void G_BaseSelfDestruct( pTeam_t team )
  
    return "<buildlog entry expired>";
  }
+/*
+ * =======
+ * nobuild
+ * =======
+ */
+
+#define MAX_NOBUILD_ZONES 16
+#define NOBUILD_THINK_TIME 200
+
+typedef struct
+{
+  qboolean in_use;
+  vec3_t origin;
+  vec3_t size;
+}
+nobuild_t;
+
+typedef struct
+{
+  vec3_t dir;
+  float yaw;
+}
+nobuild_corner_t;
+
+static nobuild_corner_t nobuildCorner[] = {
+  { { -1, -1, -1 }, 0 },
+  { { -1, 1, -1 }, 270 },
+  { { 1, -1, -1 }, 90 },
+  { { 1, 1, -1 }, 180 },
+
+  { { -1, -1, 1 }, 270 },
+  { { -1, 1, 1 }, 180 },
+  { { 1, -1, 1 }, 0 },
+  { { 1, 1, 1 }, 90 }
+};
+#define MAX_NOBUILD_CORNERS ( sizeof( nobuildCorner ) / sizeof( nobuild_corner_t ) )
+
+typedef enum
+{
+  NB_ORIGIN_X,
+  NB_ORIGIN_Y,
+  NB_ORIGIN_Z,
+  NB_SIZE_X,
+  NB_SIZE_Y,
+  NB_SIZE_Z
+}
+nobuild_sizer_t;
+#define NB_COUNT ( NB_SIZE_Z + 1 )
+
+static nobuild_t noBuildZones[ MAX_NOBUILD_ZONES ];
+
+static qboolean noBuildActive = qfalse;
+static int noBuildEditZone = 0;
+static nobuild_sizer_t noBuildEditType = NB_ORIGIN_X;
+
+void nobuild_init( void )
+{
+  char map[ MAX_QPATH ];
+  char line[ MAX_STRING_CHARS ];
+  char *data, *pool;
+  fileHandle_t f;
+  int len;
+  int lcount = 0;
+  int zonecount = 0;
+  int i;
+  int id;
+  vec3_t origin, size;
+
+  memset( noBuildZones, 0, sizeof( noBuildZones ) );
+
+  trap_Cvar_VariableStringBuffer( "mapname", map, sizeof( map ) );
+  len = trap_FS_FOpenFile( va( "layouts/%s/nobuild.nbd", map ), &f, FS_READ );
+  if( len < 0 )
+  {
+    return;
+  }
+  data = pool = G_Alloc( len + 1 );
+  trap_FS_Read( data, len, f );
+  *( data + len ) = '\0';
+  trap_FS_FCloseFile( f );
+
+  i =  0;
+  while( *data )
+  {
+    if( i >= sizeof( line ) - 1 )
+    {
+      G_Printf( S_COLOR_RED "ERROR: line overflow in %s before \"%s\"\n",
+        va( "layouts/%s/nobuild.nbd", map ), line );
+    }
+    line[ i++ ] = *data;
+    line[ i ] = '\0';
+    if( *data == '\n' )
+    {
+      i = 0;
+      lcount++;
+      id = -1;
+      if( sscanf( line, "%d %f %f %f %f %f %f\n",
+          &id,
+          &origin[ 0 ], &origin[ 1 ], &origin[ 2 ],
+          &size[ 0 ], &size[ 1 ], &size[ 2 ]) == 7 )
+      {
+        if( zonecount >= MAX_NOBUILD_ZONES )
+        {
+          G_Printf( S_COLOR_YELLOW "WARNING: nobuild zone count exceeded on line %d\n", lcount );
+          break;
+        }
+        noBuildZones[ zonecount ].in_use = qtrue;
+        VectorCopy( origin, noBuildZones[ zonecount ].origin );
+        VectorCopy( size, noBuildZones[ zonecount ].size );
+        zonecount++;
+      }
+      else
+      {
+        G_Printf( S_COLOR_YELLOW "WARNING: nobuild data parse error on line %d\n", lcount );
+      }
+    }
+    data++;
+  }
+
+  G_Free( pool );
+
+  if( zonecount )
+    G_Printf( "nobuild: loaded %d zones\n", zonecount );
+}
+
+static void nobuild_sizer_think( gentity_t *self )
+{
+  int zone, size;
+  vec3_t origin;
+
+  if( !noBuildActive )
+  {
+    G_FreeEntity( self );
+    return;
+  }
+
+  self->nextthink = level.time + NOBUILD_THINK_TIME;
+
+  zone = noBuildEditZone;
+  if( zone < 0 || zone >= MAX_NOBUILD_ZONES || !noBuildZones[ zone ].in_use )
+  {
+    if( self->r.linked )
+      trap_UnlinkEntity( self );
+    return;
+  }
+
+  size = self->damage;
+  VectorCopy( noBuildZones[ zone ].origin, origin );
+  switch ( noBuildEditType )
+  {
+    case NB_ORIGIN_X:
+    case NB_SIZE_X:
+      origin[ 0 ] += size;
+      break;
+    case NB_ORIGIN_Y:
+    case NB_SIZE_Y:
+      origin[ 1 ] += size;
+      break;
+    case NB_ORIGIN_Z:
+    case NB_SIZE_Z:
+      origin[ 2 ] += size;
+      break;
+  }
+
+  VectorCopy( origin, self->s.origin );
+  VectorCopy( origin, self->s.pos.trBase );
+  VectorCopy( origin, self->r.currentOrigin );
+
+  if( self->watertype != noBuildEditType )
+  {
+    self->watertype = noBuildEditType;
+    switch( noBuildEditType )
+    {
+      case NB_ORIGIN_X:
+      case NB_ORIGIN_Y:
+      case NB_ORIGIN_Z:
+        self->s.modelindex = G_ModelIndex( "models/players/human_base/jetpack.md3" );
+        break;
+      case NB_SIZE_X:
+      case NB_SIZE_Y:
+      case NB_SIZE_Z:
+        self->s.modelindex = G_ModelIndex( "models/players/human_base/battpack.md3" );
+        break;
+    }
+  }
+
+  if( !self->r.linked )
+    trap_LinkEntity( self );
+}
+
+static gentity_t *nobuild_sizer( float distance )
+{
+  gentity_t *self;
+
+  self = G_Spawn( );
+  self->classname = "nobuild_sizer";
+  self->s.eType = ET_GENERAL;
+
+  self->s.time = level.time;
+  self->s.pos.trType = TR_STATIONARY;
+  self->s.pos.trTime = level.time;
+
+  self->r.svFlags = SVF_BROADCAST;
+
+  self->damage = distance;
+  self->watertype = -1;
+  self->think = nobuild_sizer_think;
+
+  // run a think to set positions
+  nobuild_sizer_think( self );
+
+  return self;
+}
+
+static void nobuild_corner_think( gentity_t *self )
+{
+  int zone, corner;
+  vec3_t origin;
+
+  zone = self->count;
+  corner = self->damage;
+
+  if( !noBuildActive || !noBuildZones[ zone ].in_use )
+  {
+    G_FreeEntity( self );
+    return;
+  }
+
+  self->nextthink = level.time + NOBUILD_THINK_TIME;
+
+  VectorCopy( noBuildZones[ zone ].origin, origin );
+  origin[ 0 ] += noBuildZones[ zone ].size[ 0 ] * nobuildCorner[ corner ].dir[ 0 ];
+  origin[ 1 ] += noBuildZones[ zone ].size[ 1 ] * nobuildCorner[ corner ].dir[ 1 ];
+  origin[ 2 ] += noBuildZones[ zone ].size[ 2 ] * nobuildCorner[ corner ].dir[ 2 ];
+
+  VectorCopy( origin, self->s.origin );
+  VectorCopy( origin, self->s.pos.trBase );
+  VectorCopy( origin, self->r.currentOrigin );
+}
+
+static gentity_t *nobuild_corner( int zone, int corner )
+{
+  gentity_t *self;
+
+  if( zone < 0 || zone >= MAX_NOBUILD_ZONES )
+    return NULL;
+  if( !noBuildZones[ zone ].in_use )
+    return NULL;
+  if( corner < 0 || corner >= MAX_NOBUILD_CORNERS )
+    return NULL;
+
+  self = G_Spawn( );
+  self->classname = "nobuild_corner";
+  self->s.eType = ET_GENERAL;
+  self->s.modelindex = 9999;
+
+  self->s.time = level.time;
+  self->s.pos.trType = TR_STATIONARY;
+  self->s.pos.trTime = level.time;
+
+  self->count = zone;
+  self->damage = corner;
+  self->think = nobuild_corner_think;
+
+  // run a think to set positions
+  nobuild_corner_think( self );
+
+  self->s.apos.trBase[ YAW ] = nobuildCorner[ corner ].yaw;
+  if( nobuildCorner[ corner ].dir[ 2 ] > 0.0f )
+    self->s.apos.trBase[ PITCH ] = 180.0f;
+
+  trap_LinkEntity( self );
+
+  return self;
+}
+
+static void nobuild_think( gentity_t *self )
+{
+  int zone;
+
+  zone = self->count;
+
+  if( !noBuildActive || !noBuildZones[ zone ].in_use )
+  {
+    G_FreeEntity( self );
+    return;
+  }
+
+  self->nextthink = level.time + NOBUILD_THINK_TIME;
+  VectorCopy( noBuildZones[ zone ].origin, self->s.origin );
+  VectorCopy( noBuildZones[ zone ].origin, self->s.pos.trBase );
+  VectorCopy( noBuildZones[ zone ].origin, self->r.currentOrigin );
+}
+
+static gentity_t *nobuild_spawn( int zone )
+{
+  gentity_t *self;
+  int i;
+
+  if( zone < 0 || zone >= MAX_NOBUILD_ZONES )
+    return NULL;
+  if( !noBuildZones[ zone ].in_use )
+    return NULL;
+
+  self = G_Spawn( );
+  self->classname = "nobuild_zone";
+  self->s.eType = ET_GENERAL;
+  self->s.modelindex = G_ModelIndex( "models/buildables/repeater/repeater.md3" );
+
+  self->s.time = level.time;
+  self->s.pos.trType = TR_STATIONARY;
+  self->s.pos.trTime = level.time;
+
+  self->think = nobuild_think;
+  self->nextthink = level.time + NOBUILD_THINK_TIME;
+
+  VectorCopy( noBuildZones[ zone ].origin, self->s.origin );
+  VectorCopy( noBuildZones[ zone ].origin, self->s.pos.trBase );
+  VectorCopy( noBuildZones[ zone ].origin, self->r.currentOrigin );
+
+  self->s.apos.trBase[ PITCH ] = 180.0f;
+
+  self->count = zone;
+
+  trap_LinkEntity( self );
+
+  for( i = 0; i < MAX_NOBUILD_CORNERS; i++ )
+    nobuild_corner( zone, i );
+
+  return self;
+}
+
+static void nobuild_on( gentity_t *ent )
+{
+  int i;
+
+  if( noBuildActive )
+    return;
+
+  noBuildActive = qtrue;
+  noBuildEditZone = MAX_NOBUILD_ZONES - 1;
+  noBuildEditType = NB_ORIGIN_X;
+
+  nobuild_command( ent, qtrue, qfalse, 0.0f );
+
+  for( i = 0; i < MAX_NOBUILD_ZONES; i++ )
+  {
+    nobuild_spawn( i );
+  }
+
+  nobuild_sizer( 32.0f );
+  nobuild_sizer( -32.0f );
+
+  trap_SendServerCommand( -1,
+    va( "print \"^3!nobuild ^7edit mode enabled by %s\n\"",
+      ( ent ) ? ent->client->pers.netname : "console " ) );
+}
+
+static void nobuild_off( gentity_t *ent )
+{
+  if( noBuildActive )
+  {
+    noBuildActive = qfalse;
+
+    trap_SendServerCommand( -1,
+      va( "print \"^3!nobuild ^7edit mode disabled by %s\n\"",
+        ( ent ) ? ent->client->pers.netname : "console " ) );
+  }
+}
+
+void nobuild_add( gentity_t *ent )
+{
+  int i;
+
+  if( !noBuildActive )
+  {
+    ADMP( "!nobuild is not on, use '!nobuild on' to enable it\n" );
+    return;
+  }
+
+  if( !ent )
+    return;
+
+  for( i = 0; i < MAX_NOBUILD_ZONES; i++ )
+  {
+    if( noBuildZones[ i ].in_use )
+      continue;
+
+    noBuildZones[ i ].in_use = qtrue;
+    VectorCopy( ent->s.origin, noBuildZones[ i ].origin );
+    VectorSet( noBuildZones[ i ].size, 64.0f, 64.0f, 64.0f );
+
+    noBuildEditZone = i;
+    nobuild_spawn( i );
+
+    ADMP( va( "added nobuild zone #%d\n", i ) );
+    return;
+  }
+
+  ADMP( "maximum nobuild zones reached, can not add another zone.\n" );
+}
+
+void nobuild_del( gentity_t *ent )
+{
+  int zone;
+
+  if( !noBuildActive )
+  {
+    ADMP( "!nobuild is not on, use '!nobuild on' to enable it\n" );
+    return;
+  }
+
+  if( noBuildEditZone < 0 || noBuildEditZone >= MAX_NOBUILD_ZONES ||
+      !noBuildZones[ noBuildEditZone ].in_use )
+  {
+    ADMP( "a nobuild zone is not selected\n" );
+    return;
+  }
+
+  zone = noBuildEditZone;
+  nobuild_command( ent, qtrue, qfalse, 0.0f );
+  noBuildZones[ zone ].in_use = qfalse;
+  if( noBuildEditZone == zone )
+    noBuildEditZone = -1;
+
+  ADMP( va( "removed nobuild zone #%d\n", zone ) );
+}
+
+#define SIZE_MIN( a, b ) ( a = ( a + b < 32.0 ? a = 32.0 : a + b ) )
+
+void nobuild_command( gentity_t *ent, qboolean next_zone, qboolean next_type, float size )
+{
+  int n;
+
+  if( !noBuildActive )
+  {
+    ADMP( "!nobuild is not on, use '!nobuild on' to enable it\n" );
+    return;
+  }
+
+  if( next_zone )
+  {
+    n = noBuildEditZone + 1;
+    while( n != noBuildEditZone )
+    {
+      if( n >= MAX_NOBUILD_ZONES )
+        n = 0;
+      if( noBuildZones[ n ].in_use )
+      {
+        noBuildEditZone = n;
+        ADMP( va ( "nobuild zone %d selected\n", n ) );
+        return;
+      }
+      n++;
+    }
+  }
+  else if( next_type )
+  {
+    noBuildEditType++;
+    if ( noBuildEditType >= NB_COUNT )
+      noBuildEditType = 0;
+  }
+  else if( size )
+  {
+    switch( noBuildEditType )
+    {
+      case NB_ORIGIN_X:
+        noBuildZones[ noBuildEditZone ].origin[ 0 ] += size;
+        break;
+      case NB_ORIGIN_Y:
+        noBuildZones[ noBuildEditZone ].origin[ 1 ] += size;
+        break;
+      case NB_ORIGIN_Z:
+        noBuildZones[ noBuildEditZone ].origin[ 2 ] += size;
+        break;
+      case NB_SIZE_X:
+        SIZE_MIN( noBuildZones[ noBuildEditZone ].size[ 0 ], size );
+        break;
+      case NB_SIZE_Y:
+        SIZE_MIN( noBuildZones[ noBuildEditZone ].size[ 1 ], size );
+        break;
+      case NB_SIZE_Z:
+        SIZE_MIN( noBuildZones[ noBuildEditZone ].size[ 2 ], size );
+        break;
+    }
+  }
+}
+
+void nobuild_go( gentity_t *ent )
+{
+  if( !ent )
+    return;
+
+  if( !noBuildActive )
+  {
+    ADMP( "!nobuild is not on, use '!nobuild on' to enable it\n" );
+    return;
+  }
+  if( noBuildEditZone < 0 || noBuildEditZone >= MAX_NOBUILD_ZONES ||
+      !noBuildZones[ noBuildEditZone ].in_use )
+  {
+    ADMP( "a nobuild zone is not selected\n" );
+    return;
+  }
+
+  VectorCopy( noBuildZones[ noBuildEditZone ].origin, ent->client->ps.origin );
+}
+
+void nobuild_set( qboolean enable, gentity_t *ent )
+{
+  if( !ent && enable )
+  {
+    ADMP( "only a connected client can enable nobuild mode\n" );
+    return;
+  }
+  if( enable )
+  {
+    nobuild_on( ent );
+  }
+  else
+  {
+    nobuild_off( ent );
+  }
+} 
+
+void nobuild_save( void )
+{
+  char map[ MAX_QPATH ];
+  char fileName[ MAX_OSPATH ];
+  fileHandle_t f;
+  int len;
+  int count = 0;
+  int i;
+  char *s;
+
+  trap_Cvar_VariableStringBuffer( "mapname", map, sizeof( map ) );
+  if( !map[ 0 ] )
+  {
+    G_Printf( "LayoutSave( ): no map is loaded\n" );
+    return;
+  }
+  Com_sprintf( fileName, sizeof( fileName ), "layouts/%s/nobuild.nbd", map );
+  len = trap_FS_FOpenFile( fileName, &f, FS_WRITE );
+    if( len < 0 )
+  {
+    G_Printf( "layoutsave: could not open %s\n", fileName );
+    return;
+  }
+
+  G_Printf("layoutsave: saving layout to %s\n", fileName );
+
+  for( i = 0; i < MAX_NOBUILD_ZONES; i++ )
+  {
+    if( !noBuildZones[ i ].in_use )
+      continue;
+
+    s = va( "%d %f %f %f %f %f %f\n",
+      count,
+      noBuildZones[ i ].origin[ 0 ],
+      noBuildZones[ i ].origin[ 1 ],
+      noBuildZones[ i ].origin[ 2 ],
+      noBuildZones[ i ].size[ 0 ],
+      noBuildZones[ i ].size[ 1 ],
+      noBuildZones[ i ].size[ 2 ] );
+    trap_FS_Write( s, strlen( s ), f );
+    count++;
+  }
+
+  trap_FS_FCloseFile( f );
+  G_Printf( "saved %d nobuild zones\n", count );
+}
+
+void nobuild_list( gentity_t *ent )
+{
+  int count = 0;
+  int i;
+
+  ADMBP_begin();
+  for( i = 0; i < MAX_NOBUILD_ZONES; i++ )
+  {
+    if( !noBuildZones[ i ].in_use )
+      continue;
+
+    ADMBP( va( "%2d @ x: %6.2f, y: %6.2f, z: %6.2f - %4.2f x %4.2f x %4.2f\n",
+      i,
+      noBuildZones[ i ].origin[ 0 ],
+      noBuildZones[ i ].origin[ 1 ],
+      noBuildZones[ i ].origin[ 2 ],
+      noBuildZones[ i ].size[ 0 ],
+      noBuildZones[ i ].size[ 1 ],
+      noBuildZones[ i ].size[ 2 ] ) );
+    count++;
+  }
+
+  ADMBP( va( "nobuild contains %d zones\n", count ) );
+
+  ADMBP_end();
+}
+
+int nobuild_check( vec3_t origin )
+{
+  int i;
+
+  for( i = 0; i < MAX_NOBUILD_ZONES; i ++ )
+  {
+    if( !noBuildZones[ i ].in_use )
+      continue;
+
+    if( origin[ 0 ] > noBuildZones[ i ].origin[ 0 ] - noBuildZones[ i ].size[ 0 ] &&
+        origin[ 0 ] < noBuildZones[ i ].origin[ 0 ] + noBuildZones[ i ].size[ 0 ] &&
+        origin[ 1 ] > noBuildZones[ i ].origin[ 1 ] - noBuildZones[ i ].size[ 1 ] &&
+        origin[ 1 ] < noBuildZones[ i ].origin[ 1 ] + noBuildZones[ i ].size[ 1 ] &&
+        origin[ 2 ] > noBuildZones[ i ].origin[ 2 ] - noBuildZones[ i ].size[ 2 ] &&
+        origin[ 2 ] < noBuildZones[ i ].origin[ 2 ] + noBuildZones[ i ].size[ 2 ] )
+      return i;
+  }
+
+  return -1;
+}
+
  

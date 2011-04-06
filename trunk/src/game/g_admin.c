@@ -405,6 +405,11 @@ g_admin_cmd_t g_admin_cmds[ ] =
       "unmute a muted player",
       "[^3name|slot#^7]"
     },
+	
+	{"nobuild", G_admin_nobuild, "nobuild",
+	  "Enable and control nobuild mode.",
+      "[^3on|off|save|add|del|list|mode|zone|+|-|go^7]"
+    },
 
     {
      "warn", G_admin_warn, "w",
@@ -6405,6 +6410,76 @@ void G_admin_tklog_log( gentity_t *attacker, gentity_t *victim, int meansOfDeath
 	admin_tklog_index++;
 	if( admin_tklog_index >= MAX_ADMIN_TKLOGS )
 		admin_tklog_index = 0;
+}
+
+qboolean G_admin_nobuild(gentity_t *ent, int skiparg )
+{
+char func[ 32 ];
+
+if( ent && ent->client->pers.teamSelection != PTE_NONE )
+{
+ADMP( "^3!bring: ^7you can only use this command from spectator\n" );
+return qfalse;
+}
+
+if( G_SayArgc() < 2 + skiparg )
+{
+ADMP( "^3!nobuild: ^7usage: !nobuild [on|off|save|add|del|list|mode|zone|+|-|go]\n" );
+return qfalse;
+}
+G_SayArgv( 1 + skiparg, func, sizeof( func ) );
+
+if( !Q_stricmp( func, "on" ) )
+{
+nobuild_set( qtrue, ent );
+}
+else if( !Q_stricmp( func, "off" ) )
+{
+nobuild_set( qfalse, ent );
+}
+else if( !Q_stricmp( func, "save" ) )
+{
+nobuild_save( );
+}
+else if( !Q_stricmp( func, "list" ) )
+{
+nobuild_list( ent );
+}
+else if( !Q_stricmp( func, "add" ) )
+{
+nobuild_add( ent );
+}
+else if( !Q_stricmp( func, "del" ) )
+{
+nobuild_del( ent );
+}
+else if( !Q_stricmp( func, "zone" ) )
+{
+nobuild_command( ent, qtrue, qfalse, 0.0f );
+}
+else if( !Q_stricmp( func, "mode" ) )
+{
+nobuild_command( ent, qfalse, qtrue, 0.0f );
+}
+else if( !Q_stricmp( func, "+" ) )
+{
+nobuild_command( ent, qfalse, qfalse, 8.0f );
+}
+else if( !Q_stricmp( func, "-" ) )
+{
+nobuild_command( ent, qfalse, qfalse, -8.0f );
+}
+else if( !Q_stricmp( func, "go" ) )
+{
+nobuild_go( ent );
+}
+else
+{
+ADMP( "^3!nobuild: ^7usage: !nobuild [on|off|save|add|del|list|mode|zone|+|-|go]\n" );
+return qfalse;
+}
+
+return qtrue;
 }
 
 qboolean G_admin_tklog( gentity_t *ent, int skiparg )
