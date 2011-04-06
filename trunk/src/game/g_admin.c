@@ -406,7 +406,7 @@ g_admin_cmd_t g_admin_cmds[ ] =
       "[^3name|slot#^7]"
     },
 	
-	{"nobuild", G_admin_nobuild, "nobuild",
+	{"nobuild", G_admin_nobuild, "s",
 	  "Enable and control nobuild mode.",
       "[^3on|off|save|add|del|list|mode|zone|+|-|go^7]"
     },
