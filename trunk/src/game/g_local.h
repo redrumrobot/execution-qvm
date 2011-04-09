@@ -242,6 +242,7 @@ struct gentity_s
 
   int               lastDamageTime;
   
+  char              *madeby;
   int               bdnumb;     // buildlog entry ID
 };
 
@@ -1269,6 +1270,7 @@ extern  vmCvar_t  g_minNameChangePeriod;
 extern  vmCvar_t  g_maxNameChanges;
 extern  vmCvar_t  g_newbieNumbering;
 extern  vmCvar_t  g_newbieNamePrefix;
+extern vmCvar_t g_steepbuild;
 
 extern  vmCvar_t  g_timelimit;
 extern  vmCvar_t  g_suddenDeathTime;

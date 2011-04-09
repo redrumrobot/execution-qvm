@@ -106,6 +106,7 @@ vmCvar_t  g_minNameChangePeriod;
 vmCvar_t  g_maxNameChanges;
 vmCvar_t  g_newbieNumbering;
 vmCvar_t  g_newbieNamePrefix;
+vmCvar_t  g_steepbuild;
 
 vmCvar_t  g_humanBuildPoints;
 vmCvar_t  g_alienBuildPoints;
@@ -260,6 +261,7 @@ static cvarTable_t   gameCvarTable[ ] =
   { &g_teamStatus, "g_teamStatus", "0", CVAR_ARCHIVE, 0, qfalse  },
   { &g_teamStatusTime, "g_teamStatusTime", "10", CVAR_ARCHIVE, 0, qfalse  },
   { &g_instantBuild, "g_instantBuild", "0", CVAR_ARCHIVE, 0, qfalse  },	
+  { &g_steepbuild, "g_steepbuild", "1", CVAR_ARCHIVE, 0, qfalse },
 
   { &g_teamAutoJoin, "g_teamAutoJoin", "0", CVAR_ARCHIVE  },
   { &g_teamForceBalance, "g_teamForceBalance", "1", CVAR_ARCHIVE  },
