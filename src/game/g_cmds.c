@@ -2799,6 +2799,7 @@ void Cmd_Destroy_f( gentity_t *ent )
   trace_t     tr;
   gentity_t   *traceEnt;
   char        cmd[ 12 ];
+  char 		  bdnumbchr[21];
   qboolean    deconstruct = qtrue;
 
   if( ent->client->pers.denyBuild )
@@ -2858,8 +2859,7 @@ void Cmd_Destroy_f( gentity_t *ent )
             ent->client->pers.netname ) );
         return;
       }
- 
-
+ 		
       // Prevent destruction of the last spawn
       if( !g_markDeconstruct.integer && !g_cheats.integer )
       {
@@ -2930,10 +2930,21 @@ void Cmd_Destroy_f( gentity_t *ent )
             G_LogBuild( new );
 
             G_TeamCommand( ent->client->pers.teamSelection,
-              va( "print \"%s ^3DECONSTRUCTED^7 by %s^7\n\"",
-                BG_FindHumanNameForBuildable( traceEnt->s.modelindex ), 
-                ent->client->pers.netname ) );
-
+              va( "print \"%s ^3DECONSTRUCTED^7 by %s^7\n\"",BG_FindHumanNameForBuildable( traceEnt->s.modelindex ), ent->client->pers.netname ) );
+				
+				// tell team that rc/om has been deconstructed
+				if( traceEnt->s.modelindex == BA_H_REACTOR)
+				{
+						G_TeamCommand( PTE_HUMANS, va( "cp \"Reactor ^3DECONSTRUCTED^7 by %s\n\"", ent->client->pers.netname ) ); 
+				}
+				else 
+				{
+					if( traceEnt->s.modelindex == BA_A_OVERMIND)
+					{
+						G_TeamCommand( PTE_ALIENS, va( "cp \"Overmind ^3DECONSTRUCTED^7 by %s\n\"", ent->client->pers.netname ) );
+					}
+				}
+			 
             G_LogPrintf( "Decon: %i %i 0: %s^7 deconstructed %s\n",
               ent->client->ps.clientNum,
               traceEnt->s.modelindex,

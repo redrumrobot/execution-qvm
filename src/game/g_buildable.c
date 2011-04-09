@@ -3149,6 +3149,12 @@ itemBuildError_t G_CanBuild( gentity_t *ent, buildable_t buildable, int distance
   minNormal = BG_FindMinNormalForBuildable( buildable );
   invert = BG_FindInvertNormalForBuildable( buildable );
 
+
+if(g_steepbuild.integer > 0)
+{
+  minNormal = 0.0f;
+}
+
   //can we build at this angle?
   if( !( normal[ 2 ] >= minNormal || ( invert && normal[ 2 ] <= -minNormal ) ) )
     reason = IBE_NORMAL;
@@ -3630,6 +3636,16 @@ static gentity_t *G_Build( gentity_t *builder, buildable_t buildable, vec3_t ori
   }
 
   if( builder->client ) {
+      //Tell the team that rc/om is being built
+				if( built->s.modelindex == BA_H_REACTOR )
+				{
+						G_TeamCommand( PTE_HUMANS, va( "cp \"Reactor ^2being built^7 by %s\n\"", builder->client->pers.netname ) ); 
+				}
+				else if( built->s.modelindex == BA_A_OVERMIND )
+			  {
+						G_TeamCommand( PTE_ALIENS, va( "cp \"Overmind ^2being built^7 by %s\n\"", builder->client->pers.netname ) );
+				}
+				
     G_TeamCommand( builder->client->pers.teamSelection,
       va( "print \"%s is ^2being built^7 by %s^7\n\"",
         BG_FindHumanNameForBuildable( built->s.modelindex ), 
@@ -3655,7 +3671,7 @@ static gentity_t *G_Build( gentity_t *builder, buildable_t buildable, vec3_t ori
     VectorCopy( built->s.angles2, new->angles2 );
     new->fate = BF_BUILT;
   }
-  
+  built->madeby = ( builder->client ) ? builder->client->pers.netname : "<world>";
    if( builder && builder->client )
      built->bdnumb = new->ID;
    else
